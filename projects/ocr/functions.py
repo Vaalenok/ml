@@ -3,118 +3,151 @@ import numpy as np
 from pdf2image import convert_from_path
 
 
-def pdf_to_opencv(pdf_path, dpi=300):
-    pages = convert_from_path(pdf_path, dpi=dpi, poppler_path=r'C:\Program Files\poppler\Library\bin')
-    img = np.array(pages[0])
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    return img
+def deskew(gray):
+    h, w = gray.shape[:2]
+    margin_y, margin_x = int(h * 0.03), int(w * 0.03)
+    roi = gray[margin_y:h - margin_y, margin_x:w - margin_x]
+
+    binary = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY_INV, 31, 10)
+
+    best_angle = 0
+    best_score = -1
+
+    for angle in np.arange(-5, 5.1, 0.5):
+        M = cv2.getRotationMatrix2D((roi.shape[1] // 2, roi.shape[0] // 2), angle, 1.0)
+        rotated = cv2.warpAffine(binary, M, (roi.shape[1], roi.shape[0]),
+                                 flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT)
+        projection = np.sum(rotated, axis=1)
+        score = np.var(projection)
+
+        if score > best_score:
+            best_score = score
+            best_angle = angle
+
+    if abs(best_angle) < 0.3:
+        return gray
+
+    M = cv2.getRotationMatrix2D((w // 2, h // 2), best_angle, 1.0)
+    return cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
-def remove_small_components(binary_img, min_area=40):
-    if binary_img.dtype != np.uint8:
-        binary_img = binary_img.astype(np.uint8)
+def remove_noise_components(binary_black_on_white, min_area=10):
+    inverted = cv2.bitwise_not(binary_black_on_white)
+    nb_components, output, stats, _ = cv2.connectedComponentsWithStats(inverted, connectivity=8)
 
-    nb_components, output, stats, _ = cv2.connectedComponentsWithStats(
-        binary_img, connectivity=8)
+    cleaned = np.zeros_like(inverted)
+    for i in range(1, nb_components):
+        area = stats[i, cv2.CC_STAT_AREA]
+        cw = stats[i, cv2.CC_STAT_WIDTH]
+        ch = stats[i, cv2.CC_STAT_HEIGHT]
 
-    if nb_components <= 1:
-        return binary_img
+        if area < min_area:
+            continue
 
-    sizes = stats[1:, cv2.CC_STAT_AREA]
-    cleaned = np.zeros(output.shape, dtype=np.uint8)
+        aspect = max(cw, ch) / (min(cw, ch) + 1e-5)
+        if area < 30 and aspect < 1.5:
+            continue
 
-    for i in range(nb_components - 1):
-        if sizes[i] >= min_area:
-            cleaned[output == i + 1] = 255
+        cleaned[output == i] = 255
 
-    return cleaned
+    return cv2.bitwise_not(cleaned)
 
 
-def preprocess_for_ocr(file_path, return_binary=False, upscale_factor=1.5, deskew=True, min_area=52):
-    if file_path.lower().endswith(".pdf"):
-        img = pdf_to_opencv(file_path, dpi=300)
-    else:
-        img_array = np.fromfile(file_path, np.uint8)
-        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+def assess_document(gray):
+    background_mask = gray > 200
+    if background_mask.sum() < 1000:
+        return True, True
 
-    # Масштабирование
-    if upscale_factor != 1.0:
-        h, w = img.shape[:2]
-        new_w = int(w * upscale_factor)
-        new_h = int(h * upscale_factor)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+    background_pixels = gray[background_mask]
+    bg_std = np.std(background_pixels)
+    scan_mode = bg_std >= 8
 
-    # Улучшение контраста
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    diff = cv2.absdiff(gray, blurred)
+    noise_level = np.mean(diff[background_mask])
+    needs_denoise = noise_level > 3.0
+
+    return scan_mode, needs_denoise
+
+
+def fit_to_screen(img, max_w=1800, max_h=900):
+    h, w = img.shape[:2]
+    scale = min(max_w / w, max_h / h, 1.0)
+    if scale == 1.0:
+        return img
+
+    return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
+
+def process_single_page(img, return_binary=False, do_deskew=True, min_area=10):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
+    if do_deskew:
+        gray = deskew(gray)
 
-    # Шумоподавление
-    denoised = cv2.bilateralFilter(enhanced, d=5, sigmaColor=75, sigmaSpace=75)
+    scan_mode, needs_denoise = assess_document(gray)
 
-    # Повышение резкости
-    blurred = cv2.GaussianBlur(denoised, (0, 0), 3)
-    sharpened = cv2.addWeighted(denoised, 1.5, blurred, -0.5, 0)
+    if needs_denoise:
+        gray = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
 
-    # Выравнивание наклона
-    if deskew:
-        binary_for_deskew = cv2.adaptiveThreshold(
-            sharpened, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, 31, 10
-        )
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 5))
-        dilated = cv2.dilate(binary_for_deskew, kernel, iterations=2)
+    if scan_mode:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(16, 16))
+        enhanced = clahe.apply(gray)
+    else:
+        enhanced = gray
 
-        coords = np.column_stack(np.where(dilated > 0))
+    if not return_binary:
+        kernel_sharp = np.array([[0, -0.5, 0], [-0.5, 3, -0.5], [0, -0.5, 0]])
+        result = cv2.filter2D(enhanced, -1, kernel_sharp)
+        return np.clip(result, 0, 255).astype(np.uint8)
 
-        if len(coords) > 0:
-            rect = cv2.minAreaRect(coords)
-            angle = rect[-1]
+    if scan_mode:
+        binary = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 67, 15)
+    else:
+        binary = cv2.adaptiveThreshold(enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY, 31, 10)
 
-            if angle < -45:
-                angle = -(90 + angle)
-            else:
-                angle = -angle
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+    binary = remove_noise_components(binary, min_area=min_area)
 
-            (h, w) = sharpened.shape[:2]
-            center = (w // 2, h // 2)
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            sharpened = cv2.warpAffine(sharpened, M, (w, h),
-                                       flags=cv2.INTER_CUBIC,
-                                       borderMode=cv2.BORDER_REPLICATE)
-
-    if return_binary:
-        binary = cv2.adaptiveThreshold(
-            sharpened, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            41, 12
-        )
-
-        kernel = np.ones((2, 2), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=2)
-        binary = remove_small_components(binary, min_area=min_area)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-        return binary
-
-    return sharpened
+    return binary
 
 
-# Тесты
+def preprocess_for_ocr(file_path, return_binary=False, do_deskew=True, min_area=10, dpi=300):
+    if file_path.lower().endswith(".pdf"):
+        pages_pil = convert_from_path(file_path, dpi=dpi, poppler_path=r'C:\Program Files\poppler\Library\bin')
+        images = [cv2.cvtColor(np.array(p), cv2.COLOR_RGB2BGR) for p in pages_pil]
+    else:
+        img = cv2.imdecode(np.fromfile(file_path, np.uint8), cv2.IMREAD_COLOR)
+        h, w = img.shape[:2]
+        if w < 1500:
+            scale = 1500 / w
+            img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        images = [img]
+
+    return [process_single_page(img, return_binary=return_binary, do_deskew=do_deskew, min_area=min_area)
+            for img in images]
+
+
 if __name__ == "__main__":
-    path = "data/docs/сканирование (2).pdf"
+    path = "data/docx/сканирование0001.pdf"
 
-    original = pdf_to_opencv(path) if path.lower().endswith(".pdf") else \
-        cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)
+    if path.lower().endswith(".pdf"):
+        pages_pil = convert_from_path(path, dpi=300, poppler_path=r'C:\Program Files\poppler\Library\bin')
+        originals = [cv2.cvtColor(np.array(p), cv2.COLOR_RGB2BGR) for p in pages_pil]
+    else:
+        originals = [cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)]
 
-    result_gray = preprocess_for_ocr(path, return_binary=False, upscale_factor=1.5)
-    result_binary = preprocess_for_ocr(path, return_binary=True, upscale_factor=1.5, min_area=15)
+    result_gray = preprocess_for_ocr(path, return_binary=False)
+    result_binary = preprocess_for_ocr(path, return_binary=True)
 
-    cv2.imshow("Original", original)
-    cv2.imshow("Preprocessed Grayscale", result_gray)
-    cv2.imshow("Preprocessed Binary", result_binary)
+    for i, (orig, gray, binary) in enumerate(zip(originals, result_gray, result_binary)):
+        cv2.imshow(f"Original [{i + 1}]", fit_to_screen(orig))
+        cv2.imshow(f"Grayscale [{i + 1}]", fit_to_screen(gray))
+        cv2.imshow(f"Binary [{i + 1}]", fit_to_screen(binary))
 
     cv2.waitKey(0)
     cv2.destroyAllWindows()
