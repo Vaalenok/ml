@@ -1,11 +1,11 @@
 import os
-import numpy as np
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from paddleocr import PaddleOCR
 import shutil
 import uvicorn
-from pydantic import BaseModel, validator
+from pydantic import BaseModel
 from typing import List
+import paddle
 
 
 class OCRItem(BaseModel):
@@ -22,15 +22,22 @@ class OCRResponse(BaseModel):
     data: List[OCRPage]
 
 
+print("Compiled with CUDA:", paddle.is_compiled_with_cuda())
+print("GPU count:", paddle.device.cuda.device_count())
+print("Current device:", paddle.device.get_device())
+
+
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
+ocr = PaddleOCR(lang="ru", use_gpu=True, use_angle_cls=True)
 app = FastAPI(title="PaddleOCR API")
-ocr = PaddleOCR(lang="ru")
 
 
-@app.post("/extract")
-async def extract_text(file: UploadFile = File(...), response_model=OCRResponse):
-    temp_path = f"temp_{file.filename}"
+@app.post("/extract", response_model=OCRResponse)
+async def extract_text(file: UploadFile = File(...)):
+    temp_dir = "/tmp/uploads"
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, f"temp_{os.urandom(8).hex()}_{file.filename}")
 
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -42,7 +49,7 @@ async def extract_text(file: UploadFile = File(...), response_model=OCRResponse)
                 detail="Неподдерживаемый формат файла. Используйте JPG, PNG или PDF."
             )
 
-        results = ocr.predict(temp_path)
+        results = ocr.ocr(temp_path)
 
         if not results:
             raise HTTPException(status_code=422, detail="Текст на изображении не обнаружен")
@@ -52,20 +59,20 @@ async def extract_text(file: UploadFile = File(...), response_model=OCRResponse)
         for i, page_data in enumerate(results):
             page_items = []
 
-            if isinstance(page_data, dict):
-                texts = page_data.get("rec_texts", [])
-                scores = page_data.get("rec_scores", [])
-                boxes = page_data.get("dt_polys", [])
+            if page_data is None:
+                output.append({"page": i + 1, "items": []})
+                continue
 
-                for text, score, box in zip(texts, scores, boxes):
-                    if isinstance(box, np.ndarray):
-                        box = box.tolist()
+            for line in page_data:
+                box = line[0]
+                text = line[1][0]
+                score = line[1][1]
 
-                    page_items.append({
-                        "box": box,
-                        "text": text,
-                        "confidence": float(score)
-                    })
+                page_items.append({
+                    "box": box,
+                    "text": text,
+                    "confidence": float(score)
+                })
 
             output.append({
                 "page": i + 1,
@@ -79,9 +86,13 @@ async def extract_text(file: UploadFile = File(...), response_model=OCRResponse)
         raise HTTPException(status_code=500, detail=f"Ошибка сервера: {str(e)}")
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            try:
+                os.remove(temp_path)
+            except Exception as cleanup_error:
+                print(f"Не удалось удалить временный файл {temp_path}: {cleanup_error}")
 
 
 if __name__ == "__main__":
     print("Запуск API сервера...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.getenv("HOST", "0.0.0.0")
+    uvicorn.run(app, host=host, port=8000)

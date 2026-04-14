@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+paddleocr==2.8.1
+paddlepaddle-gpu==2.6.2
+pillow
+numpy
+pydantic
+PyMuPDF==1.23.26
+nvidia-cudnn-cu12==9.1.0.70

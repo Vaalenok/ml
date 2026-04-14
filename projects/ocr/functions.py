@@ -53,7 +53,15 @@ def fit_to_screen(img, max_w=1800, max_h=900):
     return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
 
 
-def preprocess_for_ocr(file_path, do_deskew=True, dpi=300):
+def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, dpi=300):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    base_name = os.path.basename(file_path)
+    file_name_without_ext = os.path.splitext(base_name)[0]
+    output_filename = f"proc_{file_name_without_ext}.pdf"
+    final_output_path = os.path.join(output_dir, output_filename)
+
     if file_path.lower().endswith(".pdf"):
         pages_pil = convert_from_path(file_path, dpi=dpi, poppler_path=r'C:\Program Files\poppler\Library\bin')
         images = [cv2.cvtColor(np.array(p), cv2.COLOR_RGB2BGR) for p in pages_pil]
@@ -75,29 +83,11 @@ def preprocess_for_ocr(file_path, do_deskew=True, dpi=300):
     temp_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
 
     try:
-        temp_pdf.write(img2pdf.convert(processed_bytes_list))
-        temp_pdf.close()
-        return temp_pdf.name
+        with open(final_output_path, "wb") as f:
+            f.write(img2pdf.convert(processed_bytes_list))
+
+        print(f"Файл успешно сохранен: {final_output_path}")
+        return final_output_path
     except Exception as e:
-        if os.path.exists(temp_pdf.name):
-            os.unlink(temp_pdf.name)
+        print(f"Ошибка при сохранении PDF: {e}")
         raise e
-
-
-if __name__ == "__main__":
-    path = "data/docs/сканирование0001 (2).pdf"
-
-    if path.lower().endswith(".pdf"):
-        pages_pil = convert_from_path(path, dpi=300, poppler_path=r'C:\Program Files\poppler\Library\bin')
-        originals = [cv2.cvtColor(np.array(p), cv2.COLOR_RGB2BGR) for p in pages_pil]
-    else:
-        originals = [cv2.imdecode(np.fromfile(path, np.uint8), cv2.IMREAD_COLOR)]
-
-    processed = preprocess_for_ocr(path)
-
-    for i, (orig, proc) in enumerate(zip(originals, processed)):
-        cv2.imshow(f"Original [{i + 1}]", fit_to_screen(orig))
-        cv2.imshow(f"Processed [{i + 1}]", fit_to_screen(proc))
-
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
