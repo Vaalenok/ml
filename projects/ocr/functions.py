@@ -1,5 +1,4 @@
 import os
-import tempfile
 import cv2
 import numpy as np
 from pdf2image import convert_from_path
@@ -43,16 +42,6 @@ def deskew(gray, target_dim=4000):
     return cv2.warpAffine(gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
-def fit_to_screen(img, max_w=1800, max_h=900):
-    h, w = img.shape[:2]
-    scale = min(max_w / w, max_h / h, 1.0)
-
-    if scale == 1.0:
-        return img
-
-    return cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-
-
 def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, dpi=300):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -79,8 +68,6 @@ def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, d
         final_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         _, buffer = cv2.imencode(".jpg", final_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
         processed_bytes_list.append(buffer.tobytes())
-
-    temp_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
 
     try:
         with open(final_output_path, "wb") as f:
