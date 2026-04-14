@@ -73,6 +73,7 @@ def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, d
         with open(final_output_path, "wb") as f:
             f.write(img2pdf.convert(processed_bytes_list))
 
+        final_output_path = os.path.normpath(final_output_path).replace("\\", "/")
         print(f"Файл успешно сохранен: {final_output_path}")
         return final_output_path
     except Exception as e:

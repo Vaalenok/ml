@@ -43,10 +43,10 @@ async def extract_text(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        if not file.filename.endswith((".jpg", ".png", ".pdf")):
+        if not file.filename.endswith(".pdf"):
             raise HTTPException(
                 status_code=400,
-                detail="Неподдерживаемый формат файла. Используйте JPG, PNG или PDF."
+                detail="Неподдерживаемый формат файла. Используйте PDF."
             )
 
         results = ocr.ocr(temp_path)
