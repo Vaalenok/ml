@@ -204,3 +204,6 @@ __marimo__/
 
 # data
 data/
+
+# LLM
+*.gguf

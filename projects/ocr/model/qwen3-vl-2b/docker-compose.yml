@@ -1,0 +1,28 @@
+services:
+  qwen3-vl-2b:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    volumes:
+      - "D:/projects/ML/projects/ocr/model/qwen3-vl-2b:/models:ro"
+    container_name: qwen3-vl-2b
+    ports:
+      - "8081:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      -m /models/Qwen3VL-2B-Instruct-Q4_K_M.gguf
+      --mmproj /models/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+      --host 0.0.0.0
+      --port 8080
+      -ngl 99
+      -c 12288
+      --no-mmap
+      --temp 0.65
+      --top-p 0.9
+      --top-k 40
+      --repeat-penalty 1.05

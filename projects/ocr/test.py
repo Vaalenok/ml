@@ -5,7 +5,7 @@ import functions
 url = "http://localhost:8000/extract"
 file_path = "data/docs/сканирование (2).pdf"
 
-processed_path = functions.preprocess_for_ocr(file_path)
+processed_path, _ = functions.preprocess_for_ocr(file_path)
 
 with open(processed_path, "rb") as f:
     files = {"file": ("processed.pdf", f, "application/pdf")}
