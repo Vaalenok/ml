@@ -4,6 +4,10 @@ import numpy as np
 from pdf2image import convert_from_path
 import base64
 import img2pdf
+import re
+import json
+import requests
+from pathlib import Path
 
 
 def deskew(gray, target_dim=4000):
@@ -101,3 +105,98 @@ def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, d
         except Exception as e:
             print(f"Ошибка сохранения PDF: {e}")
     return None, base64_list
+
+
+def clean_json_string(text: str) -> str:
+    text = re.sub(r'```json\s*|```', '', text).strip()
+
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1:
+        text = text[start:end + 1]
+
+    text = re.sub(r'(?s)("data":\s*\{.*?\})(?=.*\1)', '', text)
+    text = re.sub(r'(?s)("table":\s*\[.*?\])(?=.*\1)', '', text)
+
+    if text.count('{') == 1 and text.count('}') == 0:
+        text += '}'
+    elif text.count('{') > text.count('}'):
+        text = text.rstrip(',') + '\n  }\n}'
+
+    return text
+
+def query_vlm_ocr(file_path, prompt, api_url, model_name, out_prefix="vlm", temp=0.0, tokens=3072, dpi=150, timeout=300):
+    _, b64_images = preprocess_for_ocr(file_path, dpi=dpi, need_pdf=False)
+
+    function_dir = Path(__file__).resolve().parent
+    base_filename = Path(file_path).stem
+
+    target_dir = function_dir / "data" / "models" / out_prefix
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    json_path = target_dir / f"{out_prefix}_{base_filename}.json"
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump([], f)
+
+    for i, b64_img in enumerate(b64_images):
+        print(f"Обработка страницы {i + 1} из {len(b64_images)}...")
+
+        payload = {
+            "model": model_name,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                ]
+            }],
+            "temperature": temp,
+            "max_tokens": tokens,
+            "top_p": 0.9
+        }
+
+        try:
+            response = requests.post(api_url, json=payload, timeout=timeout)
+            response.raise_for_status()
+
+            raw_content = response.json()['choices'][0]['message']['content']
+            clean_content = clean_json_string(raw_content)
+
+            try:
+                page_data = json.loads(clean_content)
+            except json.JSONDecodeError:
+                print(f"Невалидный JSON на странице {i + 1}")
+                page_data = {"error": "invalid_json", "raw": clean_content}
+
+            structured_page = {
+                "page_number": i + 1,
+                "content": page_data
+            }
+
+            with open(json_path, "r+", encoding="utf-8") as f:
+                current_data = json.load(f)
+                current_data.append(structured_page)
+                f.seek(0)
+                json.dump(current_data, f, ensure_ascii=False, indent=2)
+                f.truncate()
+
+            print(f"Страница {i + 1} сохранена")
+
+        except Exception as e:
+            print(f"Ошибка на странице {i + 1}: {e}")
+            structured_page = {
+                "page_number": i + 1,
+                "model": model_name,
+                "error": str(e)
+            }
+
+            with open(json_path, "r+", encoding="utf-8") as f:
+                current_data = json.load(f)
+                current_data.append(structured_page)
+                f.seek(0)
+                json.dump(current_data, f, ensure_ascii=False, indent=2)
+                f.truncate()
+
+    print(f"\nОбработка завершена! Результат → {json_path}")
+    return json_path
