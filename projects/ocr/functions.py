@@ -161,18 +161,25 @@ def query_vlm_ocr(file_path, prompt, api_url, model_name, out_prefix="vlm", temp
             response.raise_for_status()
 
             raw_content = response.json()['choices'][0]['message']['content']
-            clean_content = clean_json_string(raw_content)
 
-            try:
-                page_data = json.loads(clean_content)
-            except json.JSONDecodeError:
-                print(f"Невалидный JSON на странице {i + 1}")
-                page_data = {"error": "invalid_json", "raw": clean_content}
+            if "lighton" in model_name.lower():
+                structured_page = {
+                    "page_number": i + 1,
+                    "content": raw_content.strip()
+                }
+            else:
+                clean_content = clean_json_string(raw_content)
 
-            structured_page = {
-                "page_number": i + 1,
-                "content": page_data
-            }
+                try:
+                    page_data = json.loads(clean_content)
+                except json.JSONDecodeError:
+                    print(f"Невалидный JSON на странице {i + 1}")
+                    page_data = {"error": "invalid_json", "raw": clean_content}
+
+                structured_page = {
+                    "page_number": i + 1,
+                    "content": page_data
+                }
 
             with open(json_path, "r+", encoding="utf-8") as f:
                 current_data = json.load(f)

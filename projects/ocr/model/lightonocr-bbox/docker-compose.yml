@@ -1,0 +1,28 @@
+services:
+  lightonocr-bbox:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    volumes:
+      - "D:/projects/ML/projects/ocr/model/lightonocr-bbox:/models:ro"
+    container_name: lightonocr-bbox
+    ports:
+      - "8082:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      -m /models/LightOnOCR-2-1B-bbox-Q5_K_M.gguf
+      --mmproj /models/mmproj-LightOnOCR-2-1B-bbox-f32.gguf
+      --host 0.0.0.0
+      --port 8080
+      -ngl 99
+      -c 8192
+      --no-mmap
+      --temp 0.0
+      --top-p 0.9
+      --top-k 40
+      --repeat-penalty 1.05
