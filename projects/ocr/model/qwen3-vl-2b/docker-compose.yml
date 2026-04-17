@@ -2,7 +2,7 @@ services:
   qwen3-vl-2b:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     volumes:
-      - "D:/projects/ML/projects/ocr/model/qwen3-vl-2b:/models:ro"
+      - "C:/My/PythonProjects/ML_edu/projects/ocr/model/qwen3-vl-2b:/models:ro"
     container_name: qwen3-vl-2b
     ports:
       - "8081:8080"
@@ -15,8 +15,8 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     command: >
-      -m /models/Qwen3VL-2B-Instruct-Q4_K_M.gguf
-      --mmproj /models/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+      -m /models/Qwen3VL-2B-Instruct-F16.gguf
+      --mmproj /models/mmproj-Qwen3VL-2B-Instruct-F16.gguf
       --host 0.0.0.0
       --port 8080
       -ngl 99

@@ -25,6 +25,6 @@ task_prompt = """
     """
 
 functions.query_vlm_ocr(
-    file_path="../../data/img/2126869_big.СНИЛС Эгамбердиев.id-o_1cpg8f5dtqeq1vf51bi71epncbc10.jpeg", prompt=task_prompt,
+    file_path="../../data/benchmark/Отсканированный документ.pdf", prompt=task_prompt,
     api_url="http://localhost:8081/v1/chat/completions", model_name="qwen3-vl-2b", out_prefix="qwen"
 )
