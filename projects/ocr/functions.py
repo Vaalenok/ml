@@ -8,6 +8,32 @@ import re
 import json
 import requests
 from pathlib import Path
+import pytesseract
+
+
+def fix_orthogonal_rotation(gray):
+    try:
+        osd = pytesseract.image_to_osd(gray, config='--psm 0')
+
+        rotate_match = re.search(r'(?<=Rotate: )\d+', osd)
+        if rotate_match:
+            angle = int(rotate_match.group(0))
+        else:
+            angle_match = re.search(r'(?<=Orientation degrees: )\d+', osd)
+            angle = int(angle_match.group(0)) if angle_match else 0
+
+        if angle == 90:
+            return cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE)
+        elif angle == 180:
+            return cv2.rotate(gray, cv2.ROTATE_180)
+        elif angle == 270:
+            return cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        return gray
+
+    except Exception as e:
+        print(f"Ошибка Tesseract OSD: {e}. Оставляю как есть.")
+        return gray
 
 
 def deskew(gray, target_dim=4000):
@@ -68,6 +94,7 @@ def preprocess_for_ocr(file_path, output_dir="data/processed", do_deskew=True, d
     for i, img in enumerate(images):
         try:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray = fix_orthogonal_rotation(gray)
 
             if do_deskew:
                 gray = deskew(gray)
