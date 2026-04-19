@@ -1,5 +1,6 @@
 import projects.ocr.functions as functions
 
+
 task_prompt = """
     Ты — высокоточный универсальный OCR-движок для российских документов.
     Верни ТОЛЬКО валидный JSON. Ничего больше. Без Markdown, без объяснений.

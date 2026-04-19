@@ -4,6 +4,7 @@ import jiwer
 import pandas as pd
 from typing import Dict
 import re
+import time
 
 
 def clean_text(text: str) -> str:
@@ -132,8 +133,7 @@ if __name__ == "__main__":
 
     print("\n" + df.to_string(index=False))
 
-    # df.to_excel("benchmark_results.xlsx", index=False)
-    # df.to_csv("benchmark_results.csv", index=False)
+    df.to_excel(f"data/benchmark/results/{time.time()}.xlsx", index=False)
 
     summary = df[df["Page"] == "TOTAL"].groupby("Model")[["CER", "WER", "Char_Acc", "Word_Acc"]].mean().round(4)
     print("\nСредние метрики по моделям (по всему документу):")
