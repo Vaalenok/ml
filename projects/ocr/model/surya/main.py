@@ -5,6 +5,7 @@ from surya.foundation import FoundationPredictor
 from surya.recognition import RecognitionPredictor
 from surya.detection import DetectionPredictor
 from surya.layout import LayoutPredictor
+from surya.settings import
 from pathlib import Path
 import json
 
